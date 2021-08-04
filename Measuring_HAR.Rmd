@@ -1,0 +1,177 @@
+---
+title: "Measuring the performance of weight lifting"
+author: "Luca"
+date: "28/7/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+The aim of this analysis is to measure the performance of different kind of physical exercises. One common behavior is to measure how much activity one person is carrying out; however, it is important to understand how well these activities are performed as well. To do so, we'll be using data coming from the [Human Activity Recognition project](https://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har).
+
+## Exploratory Analysis
+
+After having set a seed for reproducibility, we upload the data
+
+```{r data}
+# loading caret package
+library(caret)
+library(e1071)
+library(rattle)
+
+# train and test data uploading
+TrainData = read.csv("./pml-training.csv")
+TestData = read.csv("./pml-testing.csv")
+```
+
+Let's have a look at these data
+```{r data_expl}
+dim(TrainData)
+
+dim(TestData)
+
+names(TrainData)
+```
+
+We can see that the training data set consists of 19622 observations of 160 different variables. These variables include all kind of information regarding the effect of weight lifting on elbows, arms, forearms, and dumbbells, as well as time stamps and users.
+It might be useful, before starting our analysis, to clean up this data set, removing columns with at least 80 % of NAs and missing information. Moreover, we can erase the first seven columns which include less useful information such as participant's name, time step and so on.
+
+```{r cleaning}
+# remove NAs
+NACols_Train = which(colSums(is.na(TrainData) |TrainData=="")>0.8*dim(TrainData)[1]) 
+NACols_Test = which(colSums(is.na(TestData) |TestData=="")>0.8*dim(TestData)[1]) 
+
+TrainData = TrainData[,-NACols_Train]
+TestData = TestData[,-NACols_Test]
+
+# get rid of the first 7 columns: names, times, counters and so on
+TrainData = TrainData[,-c(1:7)]
+TestData = TestData[,-c(1:7)]
+
+dim(TrainData)
+
+dim(TestData)
+```
+In this way, we have reduced the number of obs from 160 to 93 for the testing data set. 
+We can therefore start our analysis.
+
+## Training algorithms
+
+First, we start by partitioning the training data set according to the 70/30 rule. I.e. 70% for training and 30% for testing, within the TestData table.
+
+```{r partition}
+# set a seed (today is July 29th 2021)
+set.seed(290721)
+
+TrainData_Part = createDataPartition(TrainData$classe, p=0.70, list=FALSE)
+Train_1 = TrainData[TrainData_Part,]
+Test_1 = TrainData[-TrainData_Part,]
+
+dim(Train_1)
+
+dim(Test_1)
+```
+
+To perform our analysis we make use of the algorithms explored during the lectures.
+
+### Classification Tree
+
+The idea is to iteratively split the variables into groups and put them together in an homogeneous way. Cross validation will be helpful to improve the efficiency, 5 folds will do the trick.
+
+```{r Classification Tree}
+train_Control = trainControl(method="cv", number=5)
+CT_model = train(classe ~., data = Train_1, method = "rpart", trControl=train_Control)
+
+print(CT_model$finalModel)
+```
+
+To have a better grasp of the result, let's take a look at the *fancyRpartPlot* as shown during lectures
+
+```{r Fancy Plot}
+fancyRpartPlot(CT_model$finalModel)
+```
+
+Finally, it is important to analyze prediction results, confusion matrix and accuracy of the classification tree algorithm
+
+```{r Classification results}
+CT_prediction = predict(CT_model,newdata=Test_1)
+
+CT_ConfusionM = confusionMatrix(factor(Test_1$classe),CT_prediction)
+
+# confusion matrix
+CT_ConfusionM$table
+
+# Accuracy
+CT_ConfusionM$overall[1]
+```
+
+Hence, accuracy is quite low using classification tree (~49%). We can move over to the next algorithm
+
+### Random Forest
+
+This algorithm relies heavily on bootstrapping: it exploits it for both samples and variables, growing multiple trees and assigning them a vote.
+
+```{r Random forest}
+RF_model = train(classe~., data=Train_1, method="rf", trControl=train_Control, verbose=FALSE)
+
+print(RF_model)
+
+plot(RF_model, main="Accuracy vs nr of predictors")
+```
+
+At a first glance, the plot tells us that RF algorithm performs much better than CT in terms of accuracy.
+To further investigate, let's look at the confusion matrix and accuracy as we've previously done.
+
+```{r RF results}
+RF_prediction = predict(RF_model,newdata=Test_1)
+
+RF_ConfusionM = confusionMatrix(factor(Test_1$classe),RF_prediction)
+
+# confusion matrix
+RF_ConfusionM$table
+
+# Accuracy
+RF_ConfusionM$overall[1]
+```
+
+This shows a very good result, telling us that accuracy is higher than before (~99%).
+
+### Boosting
+
+Finally, let's take a look at boosting algorithm. *gbm* allows us to perform boosting with trees within the caret package.
+
+```{r Boosting}
+GBM_model = train(classe~., data=Train_1, method="gbm", trControl=train_Control, verbose=FALSE)
+
+print(GBM_model)
+
+plot(GBM_model)
+```
+
+Again, let's look at confusion matrix and accuracy to compare results.
+
+```{r GBM results}
+GBM_prediction = predict(GBM_model,newdata=Test_1)
+
+GBM_ConfusionM = confusionMatrix(factor(Test_1$classe),GBM_prediction)
+
+# confusion matrix
+GBM_ConfusionM$table
+
+# Accuracy
+GBM_ConfusionM$overall[1]
+```
+
+It emerges that accuracy is higher than CT case, but still lower than that of RF (~96%).
+
+## Conclusion
+After having carried out our analysis using three different algorithms, we can conclude that RF performs better than the others in terms of accuracy. Hence, we can use it to predict the variable of interest, classe in this case.
+
+```{r conclusion}
+Pred_Final = predict(RF_model,newdata=TestData)
+Pred_Final
+```
